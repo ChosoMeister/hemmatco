@@ -1,0 +1,48 @@
+name: Scrape Hemmatco Blog
+
+on:
+  schedule:
+    - cron: '0 0,12 * * *'
+  workflow_dispatch:
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Restore processed posts cache
+        id: restore-state
+        uses: actions/cache/restore@v4
+        with:
+          path: state/processed_posts.json
+          key: processed-${{ github.run_id }}
+          restore-keys: |
+            processed-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Ensure state directory exists
+        run: mkdir -p state
+
+      - name: Run scraper
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TOPIC_ID: ${{ secrets.TELEGRAM_TOPIC_ID }}
+        run: python -m hemmatco_scraper
+
+      - name: Save processed posts cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state/processed_posts.json
+          key: processed-${{ github.run_id }}
