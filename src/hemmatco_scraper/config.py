@@ -21,6 +21,7 @@ class Settings:
     telegram_chat_id: str
     telegram_topic_id: Optional[int]
     user_agent: str
+    reset_state: bool
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -43,6 +44,7 @@ class Settings:
                 "Chrome/123.0.0.0 Safari/537.36"
             ),
         )
+        reset_state = os.getenv("RESET_STATE", "").strip().lower() in {"1", "true", "yes", "on"}
 
         return cls(
             base_url=base_url,
@@ -56,6 +58,7 @@ class Settings:
             telegram_chat_id=telegram_chat_id,
             telegram_topic_id=telegram_topic_id,
             user_agent=user_agent,
+            reset_state=reset_state,
         )
 
 

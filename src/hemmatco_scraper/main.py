@@ -53,6 +53,9 @@ def dispatch_posts(settings: Settings, posts: list[Post], state: State) -> None:
 def main() -> None:
     settings = Settings.from_env()
     state = State(settings.state_file)
+    if settings.reset_state:
+        logger.info("RESET_STATE enabled – clearing processed posts cache")
+        state.clear()
     session = create_session(settings)
     posts = collect_new_posts(session, settings, state)
     dispatch_posts(settings, posts, state)
