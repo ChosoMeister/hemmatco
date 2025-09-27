@@ -46,5 +46,12 @@ class State:
         self.load()
         return set(self._processed)
 
+    def clear(self) -> None:
+        """Forget every processed URL and persist the empty state."""
+
+        self._processed = set()
+        self._loaded = True
+        self.save()
+
 
 __all__ = ["State"]

@@ -6,7 +6,7 @@ This project scrapes the Hemmatco blog, collects direct links to all images insi
 
 - Crawls all 48 archive pages of [`https://hemmatco.com/blog/`](https://hemmatco.com/blog/).
 - Visits every post (10 posts per page) and extracts the URLs of every `<img>` element within the article body.
-- On the first run it processes the entire history starting from the oldest posts and waits 5 seconds between each request to respect the target website.
+- On the first run it processes the entire history starting from the oldest posts (page 48) and waits 5 seconds between each request to respect the target website.
 - Subsequent runs only send newly discovered posts and use a shorter (configurable) delay.
 - Sends the discovered image links to a Telegram forum topic via a bot.
 - Persists the list of processed posts in `state/processed_posts.json` so each post is sent only once.
@@ -46,6 +46,7 @@ This project scrapes the Hemmatco blog, collects direct links to all images insi
 | `INITIAL_POST_SLEEP_SECONDS` | `5` | Delay between posts during the very first full crawl. |
 | `SUBSEQUENT_POST_SLEEP_SECONDS` | `1` | Delay between posts on later runs. |
 | `STATE_FILE` | `state/processed_posts.json` | Location of the JSON state file. |
+| `RESET_STATE` | `false` | When `true`, clears the cached list of processed posts before running (useful for tests). |
 | `SCRAPER_USER_AGENT` | `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36` | Custom User-Agent header for requests. |
 
 ## GitHub Actions automation
@@ -57,6 +58,8 @@ The repository includes `.github/workflows/scrape.yml`, which runs twice a day (
 - `TELEGRAM_TOPIC_ID` (optional)
 
 The workflow preserves `state/processed_posts.json` across runs using the GitHub Actions cache. Do not delete the workflow cache if you want to keep the history of processed posts.
+
+When you trigger the workflow manually you can optionally set the `reset_state` input to `true` to clear the cached history before scraping. This is useful for test runs where you want to resend every post from the beginning.
 
 ## Telegram permissions
 

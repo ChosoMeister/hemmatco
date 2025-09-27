@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Iterable, Iterator, List
+from typing import Iterable, Iterator, List, Mapping
 from urllib.parse import urljoin
 
 import requests
@@ -52,55 +52,91 @@ def _fetch(session: Session, url: str, settings: Settings) -> Response:
 
 def iter_api_posts(session: Session, settings: Settings) -> Iterator[tuple[str, str]]:
     api_url = urljoin(settings.base_url, "/wp-json/wp/v2/posts")
-    page = 1
-    total_pages: int | None = None
     per_page = max(1, min(settings.posts_per_page, 100))
+    cached_pages: dict[int, list] = {}
+    cached_headers: dict[int, Mapping[str, str]] = {}
 
-    while True:
+    class PaginationComplete(Exception):
+        """Raised when the API indicates there are no more pages."""
+
+    def fetch_page(page: int) -> list:
         params = {
             "page": page,
             "per_page": per_page,
             "orderby": "date",
-            "order": "asc",
+            "order": "desc",
             "_fields": "link,title.rendered",
         }
+        response = session.get(api_url, params=params, timeout=settings.request_timeout)
+        if response.status_code == 400:
+            raise PaginationComplete
+        response.raise_for_status()
         try:
-            response = session.get(api_url, params=params, timeout=settings.request_timeout)
-            if response.status_code == 400:
-                logger.warning("Reached end of available posts at page %s", page)
-                break
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            logger.warning("Stopping pagination at page %s due to error: %s", page, exc)
-            break
-
-        try:
-            items = response.json()
+            payload = response.json()
         except ValueError as exc:
-            logger.warning("Invalid JSON payload on page %s: %s", page, exc)
-            break
+            raise ValueError(f"Invalid JSON payload on page {page}: {exc}") from exc
+        if not isinstance(payload, list):
+            raise ValueError(f"Unexpected JSON payload on page {page}: {payload!r}")
+        cached_pages[page] = payload
+        cached_headers[page] = response.headers
+        return payload
+
+    try:
+        fetch_page(1)
+    except PaginationComplete:
+        logger.info("No posts returned by the API")
+        return
+    except requests.RequestException as exc:
+        logger.warning("Stopping pagination at page 1 due to error: %s", exc)
+        return
+    except ValueError as exc:
+        logger.warning("%s", exc)
+        return
+
+    header_total: int | None = None
+    try:
+        headers = cached_headers.get(1)
+        if headers is not None:
+            header_total = int(headers.get("X-WP-TotalPages", ""))
+    except (ValueError, TypeError):
+        header_total = None
+
+    if header_total is None:
+        total_pages = settings.total_pages if settings.total_pages > 0 else 1
+    else:
+        total_pages = header_total
+
+    if settings.total_pages > 0:
+        total_pages = min(total_pages, settings.total_pages)
+
+    total_pages = max(1, total_pages)
+
+    for page in range(total_pages, 0, -1):
+        if page in cached_pages:
+            items = cached_pages[page]
+        else:
+            try:
+                items = fetch_page(page)
+            except PaginationComplete:
+                logger.warning("Reached end of available posts at page %s", page)
+                continue
+            except requests.RequestException as exc:
+                logger.warning("Stopping pagination at page %s due to error: %s", page, exc)
+                break
+            except ValueError as exc:
+                logger.warning("%s", exc)
+                continue
 
         if not items:
-            break
+            continue
 
-        for item in items:
+        for item in reversed(items):
             link = (item.get("link") or "").strip()
             title_html = item.get("title", {}).get("rendered", "")
             title = BeautifulSoup(title_html, "html.parser").get_text(" ", strip=True)
             if not link:
                 continue
             yield (title or link, link)
-
-        if total_pages is None:
-            try:
-                total_pages = int(response.headers.get("X-WP-TotalPages", ""))
-            except (TypeError, ValueError):
-                total_pages = None
-
-        if total_pages is not None and page >= total_pages:
-            break
-
-        page += 1
 
 
 def extract_images(session: Session, url: str, settings: Settings) -> list[str]:
