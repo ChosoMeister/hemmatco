@@ -55,4 +55,31 @@ def send_messages(
         logger.info("Sent message %s/%s to Telegram", index + 1, len(payloads))
 
 
-__all__ = ["send_messages"]
+def send_photos(
+    token: str,
+    chat_id: str,
+    topic_id: Optional[int],
+    image_urls: Iterable[str],
+) -> None:
+    photos = list(image_urls)
+    if not photos:
+        return
+    total = len(photos)
+    for index, image_url in enumerate(photos, start=1):
+        data = {
+            "chat_id": chat_id,
+            "photo": image_url,
+        }
+        if topic_id is not None:
+            data["message_thread_id"] = topic_id
+        url = f"{API_BASE}/bot{token}/sendPhoto"
+        response = requests.post(url, data=data, timeout=60)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            logger.error("Telegram API error while sending photo: %s", response.text)
+            raise
+        logger.info("Sent photo %s/%s to Telegram", index, total)
+
+
+__all__ = ["send_messages", "send_photos"]

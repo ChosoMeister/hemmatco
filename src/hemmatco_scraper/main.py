@@ -6,17 +6,14 @@ from typing import Iterable
 from .config import Settings
 from .scraper import Post, collect_new_posts, create_session, sleep_between_posts
 from .state import State
-from .telegram import send_messages
+from .telegram import send_messages, send_photos
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def format_post(post: Post) -> Iterable[str]:
-    header = f"📌 {post.title}\n{post.url}"
-    yield header
-    for index, image_url in enumerate(post.image_urls, start=1):
-        yield f"{index}. {image_url}"
+    yield f"📌 {post.title}"
 
 
 def dispatch_posts(settings: Settings, posts: list[Post], state: State) -> None:
@@ -42,7 +39,13 @@ def dispatch_posts(settings: Settings, posts: list[Post], state: State) -> None:
                 settings.telegram_topic_id,
                 format_post(post),
             )
-            logger.info("Sent %s with %s image link(s)", post.url, len(post.image_urls))
+            send_photos(
+                settings.telegram_token,
+                settings.telegram_chat_id,
+                settings.telegram_topic_id,
+                post.image_urls,
+            )
+            logger.info("Sent %s with %s image(s)", post.url, len(post.image_urls))
         state.mark_processed([post.url])
         state.save()
         logger.info("Recorded %s as processed", post.url)
