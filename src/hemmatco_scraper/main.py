@@ -44,6 +44,7 @@ def dispatch_posts(settings: Settings, posts: list[Post], state: State) -> None:
                 settings.telegram_chat_id,
                 settings.telegram_topic_id,
                 post.image_urls,
+                download_headers={"User-Agent": settings.user_agent},
             )
             logger.info("Sent %s with %s image(s)", post.url, len(post.image_urls))
         state.mark_processed([post.url])

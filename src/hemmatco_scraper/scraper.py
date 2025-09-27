@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Iterable, Iterator, List, Mapping
+from typing import Iterable, Iterator, List, Mapping, Tuple
 from urllib.parse import urljoin
 
 import requests
@@ -139,6 +139,65 @@ def iter_api_posts(session: Session, settings: Settings) -> Iterator[tuple[str, 
             yield (title or link, link)
 
 
+def _parse_srcset(value: str) -> list[Tuple[str, float]]:
+    candidates: list[Tuple[str, float]] = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        parts = item.split()
+        if not parts:
+            continue
+        source = parts[0]
+        descriptor = parts[1] if len(parts) > 1 else ""
+        score = 0.0
+        if descriptor.endswith("w"):
+            try:
+                score = float(descriptor[:-1])
+            except ValueError:
+                score = 0.0
+        elif descriptor.endswith("x"):
+            try:
+                score = float(descriptor[:-1]) * 1000
+            except ValueError:
+                score = 0.0
+        candidates.append((source, score))
+    return candidates
+
+
+def _select_best_image(img, base_url: str) -> str | None:
+    priority_sources: list[Tuple[str, float]] = []
+    for attr in (
+        "data-full-image",
+        "data-full_image",
+        "data-large_image",
+        "data-large_image_url",
+        "data-original",
+        "data-orig-file",
+    ):
+        value = (img.get(attr) or "").strip()
+        if value:
+            priority_sources.append((urljoin(base_url, value), 1_000_000.0))
+
+    for attr in ("data-srcset", "data-src-set", "srcset"):
+        value = img.get(attr)
+        if not value:
+            continue
+        for source, score in _parse_srcset(value):
+            priority_sources.append((urljoin(base_url, source), score))
+
+    for attr in ("data-src", "data-lazy-src", "src"):
+        value = (img.get(attr) or "").strip()
+        if value:
+            priority_sources.append((urljoin(base_url, value), -1.0))
+
+    if not priority_sources:
+        return None
+
+    best_url, _ = max(priority_sources, key=lambda item: item[1])
+    return best_url
+
+
 def extract_images(session: Session, url: str, settings: Settings) -> list[str]:
     response = _fetch(session, url, settings)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -152,10 +211,10 @@ def extract_images(session: Session, url: str, settings: Settings) -> list[str]:
 
     def append_images(elements: Iterable) -> None:
         for img in elements:
-            src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
-            if not src:
+            best = _select_best_image(img, url)
+            if not best:
                 continue
-            absolute = urljoin(url, src.strip())
+            absolute = best.strip()
             if absolute in seen:
                 continue
             seen.add(absolute)
