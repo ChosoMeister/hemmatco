@@ -37,7 +37,11 @@ class Settings:
         telegram_topic_id = int(telegram_topic) if telegram_topic else None
         user_agent = os.getenv(
             "SCRAPER_USER_AGENT",
-            "hemmatco-scraper/1.0 (+https://github.com/)",
+            (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/123.0.0.0 Safari/537.36"
+            ),
         )
 
         return cls(

@@ -46,7 +46,7 @@ This project scrapes the Hemmatco blog, collects direct links to all images insi
 | `INITIAL_POST_SLEEP_SECONDS` | `5` | Delay between posts during the very first full crawl. |
 | `SUBSEQUENT_POST_SLEEP_SECONDS` | `1` | Delay between posts on later runs. |
 | `STATE_FILE` | `state/processed_posts.json` | Location of the JSON state file. |
-| `SCRAPER_USER_AGENT` | `hemmatco-scraper/1.0 (+https://github.com/)` | Custom User-Agent header for requests. |
+| `SCRAPER_USER_AGENT` | `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36` | Custom User-Agent header for requests. |
 
 ## GitHub Actions automation
 

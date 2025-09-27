@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Iterable, List
+from typing import Iterable, Iterator, List
 from urllib.parse import urljoin
 
 import requests
@@ -50,42 +50,99 @@ def _fetch(session: Session, url: str, settings: Settings) -> Response:
     return resp
 
 
-def iter_blog_pages(settings: Settings) -> Iterable[str]:
-    # Start from the oldest page (highest page number) back to the newest.
-    for page in range(settings.total_pages, 0, -1):
-        if page == 1:
-            yield settings.base_url
-        else:
-            yield settings.base_url.rstrip("/") + f"/page/{page}/"
+def iter_api_posts(session: Session, settings: Settings) -> Iterator[tuple[str, str]]:
+    api_url = urljoin(settings.base_url, "/wp-json/wp/v2/posts")
+    page = 1
+    total_pages: int | None = None
+    per_page = max(1, min(settings.posts_per_page, 100))
 
+    while True:
+        params = {
+            "page": page,
+            "per_page": per_page,
+            "orderby": "date",
+            "order": "asc",
+            "_fields": "link,title.rendered",
+        }
+        try:
+            response = session.get(api_url, params=params, timeout=settings.request_timeout)
+            if response.status_code == 400:
+                logger.warning("Reached end of available posts at page %s", page)
+                break
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            logger.warning("Stopping pagination at page %s due to error: %s", page, exc)
+            break
 
-def parse_post_links(html: str) -> list[tuple[str, str]]:
-    soup = BeautifulSoup(html, "html.parser")
-    posts: list[tuple[str, str]] = []
-    for article in soup.select("article"):
-        heading = article.find(["h2", "h3"], class_=lambda _: True)
-        anchor = heading.find("a", href=True) if heading else article.find("a", href=True)
-        if not anchor:
-            continue
-        title = anchor.get_text(strip=True)
-        url = anchor["href"].strip()
-        if not title or not url:
-            continue
-        posts.append((title, url))
-    return posts
+        try:
+            items = response.json()
+        except ValueError as exc:
+            logger.warning("Invalid JSON payload on page %s: %s", page, exc)
+            break
+
+        if not items:
+            break
+
+        for item in items:
+            link = (item.get("link") or "").strip()
+            title_html = item.get("title", {}).get("rendered", "")
+            title = BeautifulSoup(title_html, "html.parser").get_text(" ", strip=True)
+            if not link:
+                continue
+            yield (title or link, link)
+
+        if total_pages is None:
+            try:
+                total_pages = int(response.headers.get("X-WP-TotalPages", ""))
+            except (TypeError, ValueError):
+                total_pages = None
+
+        if total_pages is not None and page >= total_pages:
+            break
+
+        page += 1
 
 
 def extract_images(session: Session, url: str, settings: Settings) -> list[str]:
     response = _fetch(session, url, settings)
     soup = BeautifulSoup(response.text, "html.parser")
     image_urls: list[str] = []
-    for img in soup.select("article img"):
-        src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
-        if not src:
-            continue
-        absolute = urljoin(url, src.strip())
-        if absolute not in image_urls:
+    seen: set[str] = set()
+    selectors = [
+        "div.blog-details img",
+        "article img",
+        "main img",
+    ]
+
+    def append_images(elements: Iterable) -> None:
+        for img in elements:
+            src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
+            if not src:
+                continue
+            absolute = urljoin(url, src.strip())
+            if absolute in seen:
+                continue
+            seen.add(absolute)
             image_urls.append(absolute)
+
+    for selector in selectors:
+        append_images(soup.select(selector))
+        if image_urls:
+            break
+
+    if not image_urls:
+        candidates = []
+        for img in soup.select("img"):
+            ancestor_classes = " ".join(
+                " ".join(parent.get("class", [])) if hasattr(parent, "get") else ""
+                for parent in img.parents
+            ).lower()
+            img_classes = " ".join(img.get("class", [])).lower()
+            if "logo" in ancestor_classes or "logo" in img_classes:
+                continue
+            candidates.append(img)
+        append_images(candidates)
+
     return image_urls
 
 
@@ -94,23 +151,16 @@ def collect_new_posts(session: Session, settings: Settings, state: State) -> Lis
     seen = state.processed_urls()
     posts: list[Post] = []
     seen_in_run: set[str] = set()
-    for page_url in iter_blog_pages(settings):
-        try:
-            response = _fetch(session, page_url, settings)
-        except requests.RequestException as exc:
-            logger.warning("Skipping %s due to error: %s", page_url, exc)
+    for title, post_url in iter_api_posts(session, settings):
+        if post_url in seen or post_url in seen_in_run:
             continue
-        post_links = list(reversed(parse_post_links(response.text)))
-        for title, post_url in post_links:
-            if post_url in seen or post_url in seen_in_run:
-                continue
-            try:
-                image_urls = extract_images(session, post_url, settings)
-            except requests.RequestException as exc:
-                logger.warning("Failed to fetch %s: %s", post_url, exc)
-                continue
-            posts.append(Post(title=title, url=post_url, image_urls=image_urls))
-            seen_in_run.add(post_url)
+        try:
+            image_urls = extract_images(session, post_url, settings)
+        except requests.RequestException as exc:
+            logger.warning("Failed to fetch %s: %s", post_url, exc)
+            continue
+        posts.append(Post(title=title, url=post_url, image_urls=image_urls))
+        seen_in_run.add(post_url)
     return posts
 
 
