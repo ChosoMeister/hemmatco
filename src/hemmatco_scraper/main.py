@@ -21,6 +21,9 @@ def format_post(post: Post) -> Iterable[str]:
 
 def dispatch_posts(settings: Settings, posts: list[Post], state: State) -> None:
     if not posts:
+        # Ensure the state file exists so downstream cache steps have a
+        # concrete path even when no new posts are discovered.
+        state.save()
         logger.info("No new posts to dispatch")
         return
 
