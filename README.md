@@ -1,6 +1,6 @@
 # Hemmatco Blog Scraper
 
-This project scrapes the Hemmatco blog, collects direct links to all images inside each post, and forwards the results to a Telegram forum thread. A scheduled GitHub Action runs the scraper twice a day and only forwards newly published posts after the first full crawl.
+This project scrapes the Hemmatco blog, collects direct links to all images inside each post, and forwards the results to a Telegram forum thread. It only runs when manually triggered from GitHub Actions.
 
 ## Features
 
@@ -9,7 +9,7 @@ This project scrapes the Hemmatco blog, collects direct links to all images insi
 - On the first run it processes the entire history starting from the oldest posts (page 48) and waits 5 seconds between each request to respect the target website.
 - Subsequent runs only send newly discovered posts and use a shorter (configurable) delay.
 - Sends the discovered image links to a Telegram forum topic via a bot.
-- Persists the list of processed posts in `state/processed_posts.json` so each post is sent only once.
+- Persists progress after every Telegram message and image in `state/processed_posts.json`, so an interrupted run resumes from the next unsent image.
 
 ## Local execution
 
@@ -49,15 +49,15 @@ This project scrapes the Hemmatco blog, collects direct links to all images insi
 | `RESET_STATE` | `false` | When `true`, clears the cached list of processed posts before running (useful for tests). |
 | `SCRAPER_USER_AGENT` | `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36` | Custom User-Agent header for requests. |
 
-## GitHub Actions automation
+## Manual GitHub Actions run
 
-The repository includes `.github/workflows/scrape.yml`, which runs twice a day (`00:00` and `12:00` UTC) and on manual dispatch. Configure the following repository secrets so the workflow can send Telegram updates:
+The repository includes `.github/workflows/scrape.yml`, which has no schedule and only runs via manual dispatch. Configure the following repository secrets so the workflow can send Telegram updates:
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 - `TELEGRAM_TOPIC_ID` (optional)
 
-The workflow preserves `state/processed_posts.json` across runs using the GitHub Actions cache. Do not delete the workflow cache if you want to keep the history of processed posts.
+The workflow preserves `state/processed_posts.json` across runs using the GitHub Actions cache. Do not delete the workflow cache if you want to keep the history and per-image progress.
 
 When you trigger the workflow manually you can optionally set the `reset_state` input to `true` to clear the cached history before scraping. This is useful for test runs where you want to resend every post from the beginning.
 

@@ -1,8 +1,6 @@
 name: Scrape Hemmatco Blog
 
 on:
-  schedule:
-    - cron: '0 0,12 * * *'
   workflow_dispatch:
     inputs:
       reset_state:
@@ -13,6 +11,9 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    concurrency:
+      group: hemmatco-telegram-dispatch
+      cancel-in-progress: false
 
     steps:
       - name: Check out repository
