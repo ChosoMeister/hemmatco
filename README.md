@@ -4,11 +4,11 @@ This project scrapes the Hemmatco blog, collects direct links to all images insi
 
 ## Features
 
-- Crawls all 48 archive pages of [`https://hemmatco.com/blog/`](https://hemmatco.com/blog/).
-- Visits every post (10 posts per page) and extracts the URLs of every `<img>` element within the article body.
-- On the first run it processes the entire history starting from the oldest posts (page 48) and waits 5 seconds between each request to respect the target website.
+- Reads all available posts from the WordPress REST API in chronological order.
+- Extracts featured and inline images directly from the API response without opening every post page.
+- On the first run it processes the entire available history starting from the oldest post and waits 5 seconds between Telegram posts.
 - Subsequent runs only send newly discovered posts and use a shorter (configurable) delay.
-- Sends the discovered image links to a Telegram forum topic via a bot.
+- Downloads and sends the discovered image files to a Telegram forum topic via a bot.
 - Persists progress after every Telegram message and image in `state/processed_posts.json`, so an interrupted run resumes from the next unsent image.
 
 ## Local execution
@@ -40,8 +40,9 @@ This project scrapes the Hemmatco blog, collects direct links to all images insi
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `BLOG_BASE_URL` | `https://hemmatco.com/blog/` | Base blog URL. |
-| `BLOG_TOTAL_PAGES` | `48` | Total number of archive pages to crawl. |
-| `BLOG_POSTS_PER_PAGE` | `10` | Number of posts per archive page (used for logging). |
+| `BLOG_TOTAL_PAGES` | `0` | Optional page cap. `0` follows the API-reported total and reads the full history. |
+| `BLOG_POSTS_PER_PAGE` | `100` | Number of WordPress posts requested per API page. |
+| `BLOG_CONNECT_TIMEOUT` | `10` | Connection timeout in seconds. |
 | `BLOG_REQUEST_TIMEOUT` | `30` | HTTP timeout in seconds. |
 | `INITIAL_POST_SLEEP_SECONDS` | `5` | Delay between posts during the very first full crawl. |
 | `SUBSEQUENT_POST_SLEEP_SECONDS` | `1` | Delay between posts on later runs. |

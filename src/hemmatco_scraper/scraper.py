@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
-from requests import Response, Session
+from requests import Session
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -25,11 +25,18 @@ class Post:
     image_urls: list[str]
 
 
+class SourceUnavailableError(RuntimeError):
+    """Raised when the WordPress API cannot provide a complete post listing."""
+
+
 def create_session(settings: Settings) -> Session:
     session = requests.Session()
     retries = Retry(
-        total=5,
-        backoff_factor=0.5,
+        total=2,
+        connect=2,
+        read=2,
+        status=2,
+        backoff_factor=1,
         status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=("GET", "POST"),
     )
@@ -43,14 +50,10 @@ def create_session(settings: Settings) -> Session:
     return session
 
 
-def _fetch(session: Session, url: str, settings: Settings) -> Response:
-    logger.debug("Fetching %s", url)
-    resp = session.get(url, timeout=settings.request_timeout)
-    resp.raise_for_status()
-    return resp
-
-
-def iter_api_posts(session: Session, settings: Settings) -> Iterator[tuple[str, str]]:
+def iter_api_posts(
+    session: Session,
+    settings: Settings,
+) -> Iterator[tuple[str, str, str, str | None]]:
     api_url = urljoin(settings.base_url, "/wp-json/wp/v2/posts")
     per_page = max(1, min(settings.posts_per_page, 100))
     cached_pages: dict[int, list] = {}
@@ -65,9 +68,14 @@ def iter_api_posts(session: Session, settings: Settings) -> Iterator[tuple[str, 
             "per_page": per_page,
             "orderby": "date",
             "order": "desc",
-            "_fields": "link,title.rendered",
+            "_embed": "wp:featuredmedia",
+            "_fields": "id,link,title.rendered,content.rendered,featured_media,_embedded",
         }
-        response = session.get(api_url, params=params, timeout=settings.request_timeout)
+        response = session.get(
+            api_url,
+            params=params,
+            timeout=(settings.connect_timeout, settings.request_timeout),
+        )
         if response.status_code == 400:
             raise PaginationComplete
         response.raise_for_status()
@@ -87,11 +95,11 @@ def iter_api_posts(session: Session, settings: Settings) -> Iterator[tuple[str, 
         logger.info("No posts returned by the API")
         return
     except requests.RequestException as exc:
-        logger.warning("Stopping pagination at page 1 due to error: %s", exc)
-        return
+        raise SourceUnavailableError(
+            f"Hemmatco WordPress API is unavailable: {exc}"
+        ) from exc
     except ValueError as exc:
-        logger.warning("%s", exc)
-        return
+        raise SourceUnavailableError(str(exc)) from exc
 
     header_total: int | None = None
     try:
@@ -118,14 +126,15 @@ def iter_api_posts(session: Session, settings: Settings) -> Iterator[tuple[str, 
             try:
                 items = fetch_page(page)
             except PaginationComplete:
-                logger.warning("Reached end of available posts at page %s", page)
-                continue
+                raise SourceUnavailableError(
+                    f"WordPress API ended unexpectedly at page {page}"
+                )
             except requests.RequestException as exc:
-                logger.warning("Stopping pagination at page %s due to error: %s", page, exc)
-                break
+                raise SourceUnavailableError(
+                    f"Failed to retrieve WordPress API page {page}: {exc}"
+                ) from exc
             except ValueError as exc:
-                logger.warning("%s", exc)
-                continue
+                raise SourceUnavailableError(str(exc)) from exc
 
         if not items:
             continue
@@ -134,9 +143,25 @@ def iter_api_posts(session: Session, settings: Settings) -> Iterator[tuple[str, 
             link = (item.get("link") or "").strip()
             title_html = item.get("title", {}).get("rendered", "")
             title = BeautifulSoup(title_html, "html.parser").get_text(" ", strip=True)
+            content_html = item.get("content", {}).get("rendered", "")
+            featured_url = _featured_image_url(item)
             if not link:
                 continue
-            yield (title or link, link)
+            yield (title or link, link, content_html, featured_url)
+
+
+def _featured_image_url(item: Mapping) -> str | None:
+    embedded = item.get("_embedded")
+    if not isinstance(embedded, Mapping):
+        return None
+    media_items = embedded.get("wp:featuredmedia")
+    if not isinstance(media_items, list) or not media_items:
+        return None
+    media = media_items[0]
+    if not isinstance(media, Mapping):
+        return None
+    source_url = media.get("source_url")
+    return source_url.strip() if isinstance(source_url, str) and source_url.strip() else None
 
 
 def _parse_srcset(value: str) -> list[Tuple[str, float]]:
@@ -198,20 +223,18 @@ def _select_best_image(img, base_url: str) -> str | None:
     return best_url
 
 
-def extract_images(session: Session, url: str, settings: Settings) -> list[str]:
-    response = _fetch(session, url, settings)
-    soup = BeautifulSoup(response.text, "html.parser")
+def extract_images_from_html(
+    html: str,
+    base_url: str,
+    featured_url: str | None = None,
+) -> list[str]:
+    soup = BeautifulSoup(html, "html.parser")
     image_urls: list[str] = []
     seen: set[str] = set()
-    selectors = [
-        "div.blog-details img",
-        "article img",
-        "main img",
-    ]
 
     def append_images(elements: Iterable) -> None:
         for img in elements:
-            best = _select_best_image(img, url)
+            best = _select_best_image(img, base_url)
             if not best:
                 continue
             absolute = best.strip()
@@ -220,23 +243,12 @@ def extract_images(session: Session, url: str, settings: Settings) -> list[str]:
             seen.add(absolute)
             image_urls.append(absolute)
 
-    for selector in selectors:
-        append_images(soup.select(selector))
-        if image_urls:
-            break
+    if featured_url:
+        absolute_featured_url = urljoin(base_url, featured_url.strip())
+        seen.add(absolute_featured_url)
+        image_urls.append(absolute_featured_url)
 
-    if not image_urls:
-        candidates = []
-        for img in soup.select("img"):
-            ancestor_classes = " ".join(
-                " ".join(parent.get("class", [])) if hasattr(parent, "get") else ""
-                for parent in img.parents
-            ).lower()
-            img_classes = " ".join(img.get("class", [])).lower()
-            if "logo" in ancestor_classes or "logo" in img_classes:
-                continue
-            candidates.append(img)
-        append_images(candidates)
+    append_images(soup.select("img"))
 
     return image_urls
 
@@ -246,14 +258,10 @@ def collect_new_posts(session: Session, settings: Settings, state: State) -> Lis
     seen = state.processed_urls()
     posts: list[Post] = []
     seen_in_run: set[str] = set()
-    for title, post_url in iter_api_posts(session, settings):
+    for title, post_url, content_html, featured_url in iter_api_posts(session, settings):
         if post_url in seen or post_url in seen_in_run:
             continue
-        try:
-            image_urls = extract_images(session, post_url, settings)
-        except requests.RequestException as exc:
-            logger.warning("Failed to fetch %s: %s", post_url, exc)
-            continue
+        image_urls = extract_images_from_html(content_html, post_url, featured_url)
         posts.append(Post(title=title, url=post_url, image_urls=image_urls))
         seen_in_run.add(post_url)
     return posts
@@ -274,7 +282,9 @@ def sleep_between_posts(index: int, total: int, settings: Settings, initial_run:
 
 __all__ = [
     "Post",
+    "SourceUnavailableError",
     "collect_new_posts",
     "create_session",
+    "extract_images_from_html",
     "sleep_between_posts",
 ]

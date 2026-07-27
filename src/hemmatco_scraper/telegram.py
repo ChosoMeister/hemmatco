@@ -147,6 +147,12 @@ def _download_image(
     response = requests.get(url, headers=headers, timeout=timeout)
     response.raise_for_status()
     content_type = response.headers.get("Content-Type")
+    if not content_type or not content_type.lower().startswith("image/"):
+        raise requests.RequestException(
+            f"Expected an image response from {url}, got {content_type or 'no Content-Type'}"
+        )
+    if not response.content:
+        raise requests.RequestException(f"Downloaded an empty image from {url}")
     filename = _infer_filename(url, content_type)
     return filename, content_type, response.content
 

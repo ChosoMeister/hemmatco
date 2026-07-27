@@ -13,6 +13,7 @@ class Settings:
     base_url: str
     total_pages: int
     posts_per_page: int
+    connect_timeout: int
     request_timeout: int
     initial_sleep_seconds: float
     subsequent_sleep_seconds: float
@@ -26,8 +27,9 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         base_url = os.getenv("BLOG_BASE_URL", "https://hemmatco.com/blog/")
-        total_pages = int(os.getenv("BLOG_TOTAL_PAGES", "48"))
-        posts_per_page = int(os.getenv("BLOG_POSTS_PER_PAGE", "10"))
+        total_pages = int(os.getenv("BLOG_TOTAL_PAGES", "0"))
+        posts_per_page = int(os.getenv("BLOG_POSTS_PER_PAGE", "100"))
+        connect_timeout = int(os.getenv("BLOG_CONNECT_TIMEOUT", "10"))
         request_timeout = int(os.getenv("BLOG_REQUEST_TIMEOUT", "30"))
         initial_sleep_seconds = float(os.getenv("INITIAL_POST_SLEEP_SECONDS", "5"))
         subsequent_sleep_seconds = float(os.getenv("SUBSEQUENT_POST_SLEEP_SECONDS", "1"))
@@ -50,6 +52,7 @@ class Settings:
             base_url=base_url,
             total_pages=total_pages,
             posts_per_page=posts_per_page,
+            connect_timeout=connect_timeout,
             request_timeout=request_timeout,
             initial_sleep_seconds=initial_sleep_seconds,
             subsequent_sleep_seconds=subsequent_sleep_seconds,

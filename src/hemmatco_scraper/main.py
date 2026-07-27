@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Iterable
 
+import requests
+
 from .config import Settings
 from .scraper import Post, collect_new_posts, create_session, sleep_between_posts
 from .state import State
@@ -10,6 +12,10 @@ from .telegram import send_messages, send_photos
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+class DispatchIncompleteError(RuntimeError):
+    """Raised after all posts are attempted and one or more images failed."""
 
 
 def format_post(post: Post) -> Iterable[str]:
@@ -26,6 +32,7 @@ def dispatch_posts(settings: Settings, posts: list[Post], state: State) -> None:
 
     initial_run = not state.processed_urls()
     total = len(posts)
+    failed_images: list[tuple[str, str]] = []
     logger.info("Dispatching %s post(s) to Telegram", total)
 
     for idx, post in enumerate(posts):
@@ -54,22 +61,48 @@ def dispatch_posts(settings: Settings, posts: list[Post], state: State) -> None:
                 post.url,
                 len(post.image_urls) - len(pending_images),
             )
+            post_failed = False
             for image_url in pending_images:
-                send_photos(
-                    settings.telegram_token,
-                    settings.telegram_chat_id,
-                    settings.telegram_topic_id,
-                    [image_url],
-                    download_headers={"User-Agent": settings.user_agent},
-                )
+                try:
+                    send_photos(
+                        settings.telegram_token,
+                        settings.telegram_chat_id,
+                        settings.telegram_topic_id,
+                        [image_url],
+                        download_headers={"User-Agent": settings.user_agent},
+                    )
+                except requests.RequestException as exc:
+                    post_failed = True
+                    failed_images.append((post.url, image_url))
+                    logger.error(
+                        "Image remains pending after a send failure: %s (%s)",
+                        image_url,
+                        exc,
+                    )
+                    continue
                 state.mark_image_processed(post.url, image_url)
                 state.save()
-            logger.info("Sent all %s image(s) for %s", len(post.image_urls), post.url)
-        state.mark_processed([post.url])
-        state.save()
-        logger.info("Recorded %s as processed", post.url)
+            logger.info("Completed image send attempts for %s", post.url)
+            if post_failed:
+                logger.warning(
+                    "Leaving %s incomplete so failed images can be retried",
+                    post.url,
+                )
+            else:
+                state.mark_processed([post.url])
+                state.save()
+                logger.info("Recorded %s as processed", post.url)
+        if not post.image_urls:
+            state.mark_processed([post.url])
+            state.save()
+            logger.info("Recorded %s as processed", post.url)
         if idx < total - 1:
             sleep_between_posts(idx, total, settings, initial_run)
+
+    if failed_images:
+        raise DispatchIncompleteError(
+            f"{len(failed_images)} image(s) failed and remain pending for the next run"
+        )
 
 
 def main() -> None:

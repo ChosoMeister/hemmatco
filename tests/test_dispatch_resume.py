@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from hemmatco_scraper.main import dispatch_posts
+import requests
+
+from hemmatco_scraper.main import DispatchIncompleteError, dispatch_posts
 from hemmatco_scraper.scraper import Post
 from hemmatco_scraper.state import State
 
@@ -79,6 +81,41 @@ class DispatchResumeTests(unittest.TestCase):
 
             self.assertTrue(state.is_processed("https://example.test/done"))
             self.assertFalse(state.is_announced("https://example.test/new"))
+
+    def test_failed_image_does_not_block_later_images(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            post = Post(
+                "Title",
+                "https://example.test/post",
+                ["image-1", "image-2", "image-3"],
+            )
+            sent: list[str] = []
+
+            def fail_middle_image(*args, **kwargs) -> None:
+                image_url = args[3][0]
+                if image_url == "image-2":
+                    raise requests.RequestException("bad image")
+                sent.append(image_url)
+
+            with (
+                patch("hemmatco_scraper.main.send_messages"),
+                patch(
+                    "hemmatco_scraper.main.send_photos",
+                    side_effect=fail_middle_image,
+                ),
+                self.assertRaises(DispatchIncompleteError),
+            ):
+                dispatch_posts(settings(), [post], State(state_path))
+
+            self.assertEqual(sent, ["image-1", "image-3"])
+            state = State(state_path)
+            self.assertTrue(state.is_image_processed(post.url, "image-1"))
+            self.assertFalse(state.is_image_processed(post.url, "image-2"))
+            self.assertTrue(state.is_image_processed(post.url, "image-3"))
+            self.assertFalse(state.is_processed(post.url))
 
 
 if __name__ == "__main__":
