@@ -44,6 +44,7 @@ This project scrapes the Hemmatco blog, collects direct links to all images insi
 | `BLOG_POSTS_PER_PAGE` | `100` | Number of WordPress posts requested per API page. |
 | `BLOG_CONNECT_TIMEOUT` | `10` | Connection timeout in seconds. |
 | `BLOG_REQUEST_TIMEOUT` | `30` | HTTP timeout in seconds. |
+| `BLOG_EXPIRED_CERT_SHA256` | Current emergency pin | Temporary SHA-256 pin used only when the Hemmatco certificate is expired. Remove this workaround after the site certificate is renewed. |
 | `INITIAL_POST_SLEEP_SECONDS` | `5` | Delay between posts during the very first full crawl. |
 | `SUBSEQUENT_POST_SLEEP_SECONDS` | `1` | Delay between posts on later runs. |
 | `STATE_FILE` | `state/processed_posts.json` | Location of the JSON state file. |

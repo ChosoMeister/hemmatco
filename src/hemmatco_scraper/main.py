@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from typing import Iterable
+from urllib.parse import urlparse
 
 import requests
 
@@ -62,7 +63,9 @@ def dispatch_posts(settings: Settings, posts: list[Post], state: State) -> None:
                 len(post.image_urls) - len(pending_images),
             )
             post_failed = False
+            source_host = urlparse(settings.base_url).hostname
             for image_url in pending_images:
+                image_host = urlparse(image_url).hostname
                 try:
                     send_photos(
                         settings.telegram_token,
@@ -70,6 +73,9 @@ def dispatch_posts(settings: Settings, posts: list[Post], state: State) -> None:
                         settings.telegram_topic_id,
                         [image_url],
                         download_headers={"User-Agent": settings.user_agent},
+                        download_verify=(
+                            settings.source_tls_verify or image_host != source_host
+                        ),
                     )
                 except requests.RequestException as exc:
                     post_failed = True

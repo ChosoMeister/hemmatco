@@ -14,8 +14,13 @@ from urllib3.util.retry import Retry
 
 from .config import Settings
 from .state import State
+from .tls import CertificatePinError, allow_pinned_expired_certificate
 
 logger = logging.getLogger(__name__)
+
+
+def _is_expired_certificate_error(exc: requests.exceptions.SSLError) -> bool:
+    return "certificate has expired" in str(exc).lower()
 
 
 @dataclass(slots=True)
@@ -75,6 +80,7 @@ def iter_api_posts(
             api_url,
             params=params,
             timeout=(settings.connect_timeout, settings.request_timeout),
+            verify=settings.source_tls_verify,
         )
         if response.status_code == 400:
             raise PaginationComplete
@@ -94,6 +100,32 @@ def iter_api_posts(
     except PaginationComplete:
         logger.info("No posts returned by the API")
         return
+    except requests.exceptions.SSLError as exc:
+        if not _is_expired_certificate_error(exc):
+            raise SourceUnavailableError(
+                f"Hemmatco WordPress API TLS verification failed: {exc}"
+            ) from exc
+        try:
+            allow_pinned_expired_certificate(
+                api_url,
+                settings.expired_cert_sha256,
+                settings.connect_timeout,
+            )
+        except (CertificatePinError, OSError) as pin_exc:
+            raise SourceUnavailableError(
+                f"Hemmatco certificate is expired and its emergency pin was rejected: {pin_exc}"
+            ) from exc
+        settings.source_tls_verify = False
+        logger.warning(
+            "Hemmatco TLS certificate is expired but matches the pinned fingerprint; "
+            "continuing temporarily without CA date validation. Renew the site certificate."
+        )
+        try:
+            fetch_page(1)
+        except requests.RequestException as retry_exc:
+            raise SourceUnavailableError(
+                f"Hemmatco WordPress API is unavailable after pinned TLS fallback: {retry_exc}"
+            ) from retry_exc
     except requests.RequestException as exc:
         raise SourceUnavailableError(
             f"Hemmatco WordPress API is unavailable: {exc}"

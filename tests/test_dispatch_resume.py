@@ -12,12 +12,14 @@ from hemmatco_scraper.state import State
 
 def settings() -> SimpleNamespace:
     return SimpleNamespace(
+        base_url="https://example.test/blog/",
         telegram_token="token",
         telegram_chat_id="chat",
         telegram_topic_id=None,
         user_agent="test",
         initial_sleep_seconds=0,
         subsequent_sleep_seconds=0,
+        source_tls_verify=True,
     )
 
 

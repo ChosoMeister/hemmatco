@@ -104,6 +104,7 @@ def send_photos(
     *,
     download_headers: Optional[dict[str, str]] = None,
     download_timeout: int = 60,
+    download_verify: bool = True,
 ) -> None:
     photos = list(image_urls)
     if not photos:
@@ -115,6 +116,7 @@ def send_photos(
                 image_url,
                 headers=download_headers,
                 timeout=download_timeout,
+                verify=download_verify,
             )
         except requests.RequestException as exc:
             logger.error("Failed to download %s: %s", image_url, exc)
@@ -143,8 +145,9 @@ def _download_image(
     *,
     headers: Optional[dict[str, str]] = None,
     timeout: int,
+    verify: bool = True,
 ) -> tuple[str, Optional[str], bytes]:
-    response = requests.get(url, headers=headers, timeout=timeout)
+    response = requests.get(url, headers=headers, timeout=timeout, verify=verify)
     response.raise_for_status()
     content_type = response.headers.get("Content-Type")
     if not content_type or not content_type.lower().startswith("image/"):

@@ -23,6 +23,8 @@ class Settings:
     telegram_topic_id: Optional[int]
     user_agent: str
     reset_state: bool
+    expired_cert_sha256: str
+    source_tls_verify: bool = True
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -47,6 +49,10 @@ class Settings:
             ),
         )
         reset_state = os.getenv("RESET_STATE", "").strip().lower() in {"1", "true", "yes", "on"}
+        expired_cert_sha256 = os.getenv(
+            "BLOG_EXPIRED_CERT_SHA256",
+            "C6EED99A187140EFD6E24F0175EB25A8DF6E0DF6E886D27C7793B176EFA7FC11",
+        ).replace(":", "").strip().upper()
 
         return cls(
             base_url=base_url,
@@ -62,6 +68,7 @@ class Settings:
             telegram_topic_id=telegram_topic_id,
             user_agent=user_agent,
             reset_state=reset_state,
+            expired_cert_sha256=expired_cert_sha256,
         )
 
 

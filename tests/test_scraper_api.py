@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import requests
 
@@ -28,7 +29,7 @@ class FakeSession:
         self.pages = pages
         self.requested_pages: list[int] = []
 
-    def get(self, url, *, params, timeout):
+    def get(self, url, *, params, timeout, verify):
         page = params["page"]
         self.requested_pages.append(page)
         return FakeResponse(self.pages[page], total_pages=len(self.pages))
@@ -55,6 +56,8 @@ class WordPressApiTests(unittest.TestCase):
             total_pages=0,
             connect_timeout=10,
             request_timeout=30,
+            expired_cert_sha256="PIN",
+            source_tls_verify=True,
         )
 
     def test_posts_are_returned_oldest_to_newest_across_pages(self) -> None:
@@ -84,6 +87,42 @@ class WordPressApiTests(unittest.TestCase):
 
         with self.assertRaises(SourceUnavailableError):
             list(iter_api_posts(UnavailableSession(), self.settings()))
+
+    def test_expired_certificate_uses_fallback_only_after_pin_match(self) -> None:
+        class ExpiredThenAvailableSession:
+            def __init__(self) -> None:
+                self.calls: list[bool] = []
+
+            def get(self, *args, **kwargs):
+                verify = kwargs["verify"]
+                self.calls.append(verify)
+                if verify:
+                    raise requests.exceptions.SSLError("certificate has expired")
+                return FakeResponse([api_item(1)])
+
+        session = ExpiredThenAvailableSession()
+        settings = self.settings()
+        with patch("hemmatco_scraper.scraper.allow_pinned_expired_certificate") as pin:
+            posts = list(iter_api_posts(session, settings))
+
+        pin.assert_called_once()
+        self.assertEqual(session.calls, [True, False])
+        self.assertFalse(settings.source_tls_verify)
+        self.assertEqual(len(posts), 1)
+
+    def test_expired_certificate_is_rejected_when_pin_changes(self) -> None:
+        class ExpiredSession:
+            def get(self, *args, **kwargs):
+                raise requests.exceptions.SSLError("certificate has expired")
+
+        with (
+            patch(
+                "hemmatco_scraper.scraper.allow_pinned_expired_certificate",
+                side_effect=OSError("fingerprint changed"),
+            ),
+            self.assertRaises(SourceUnavailableError),
+        ):
+            list(iter_api_posts(ExpiredSession(), self.settings()))
 
     def test_featured_then_inline_images_preserve_content_order(self) -> None:
         html = """
