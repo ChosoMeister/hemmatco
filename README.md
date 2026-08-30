@@ -10,6 +10,7 @@ This project scrapes the Hemmatco blog, collects direct links to all images insi
 - Subsequent runs only send newly discovered posts and use a shorter (configurable) delay.
 - Downloads and sends the discovered image files to a Telegram forum topic via a bot.
 - Persists progress after every Telegram message and image in `state/processed_posts.json`, so an interrupted run resumes from the next unsent image.
+- Commits the state file back to `master`; it does not rely on expiring GitHub Actions caches.
 
 ## Local execution
 
@@ -45,6 +46,7 @@ This project scrapes the Hemmatco blog, collects direct links to all images insi
 | `BLOG_CONNECT_TIMEOUT` | `10` | Connection timeout in seconds. |
 | `BLOG_REQUEST_TIMEOUT` | `30` | HTTP timeout in seconds. |
 | `BLOG_EXPIRED_CERT_SHA256` | Current emergency pin | Temporary SHA-256 pin used only when the Hemmatco certificate is expired. Remove this workaround after the site certificate is renewed. |
+| `STATE_BOOTSTRAP_MAX_POST_ID` | `11948` | One-time stable WordPress ID boundary covering the 690 posts proven sent by 2026-07-28. Used only when no persistent state file exists. |
 | `INITIAL_POST_SLEEP_SECONDS` | `5` | Delay between posts during the very first full crawl. |
 | `SUBSEQUENT_POST_SLEEP_SECONDS` | `1` | Delay between posts on later runs. |
 | `STATE_FILE` | `state/processed_posts.json` | Location of the JSON state file. |
@@ -59,7 +61,7 @@ The repository includes `.github/workflows/scrape.yml`, which has no schedule an
 - `TELEGRAM_CHAT_ID`
 - `TELEGRAM_TOPIC_ID` (optional)
 
-The workflow preserves `state/processed_posts.json` across runs using the GitHub Actions cache. Do not delete the workflow cache if you want to keep the history and per-image progress.
+The workflow commits `state/processed_posts.json` back to `master` after every run, including interrupted or failed runs. This keeps progress durable instead of depending on an expiring Actions cache.
 
 When you trigger the workflow manually you can optionally set the `reset_state` input to `true` to clear the cached history before scraping. This is useful for test runs where you want to resend every post from the beginning.
 

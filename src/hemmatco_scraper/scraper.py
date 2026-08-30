@@ -58,7 +58,7 @@ def create_session(settings: Settings) -> Session:
 def iter_api_posts(
     session: Session,
     settings: Settings,
-) -> Iterator[tuple[str, str, str, str | None]]:
+) -> Iterator[tuple[int, str, str, str, str | None]]:
     api_url = urljoin(settings.base_url, "/wp-json/wp/v2/posts")
     per_page = max(1, min(settings.posts_per_page, 100))
     cached_pages: dict[int, list] = {}
@@ -179,7 +179,7 @@ def iter_api_posts(
             featured_url = _featured_image_url(item)
             if not link:
                 continue
-            yield (title or link, link, content_html, featured_url)
+            yield (int(item["id"]), title or link, link, content_html, featured_url)
 
 
 def _featured_image_url(item: Mapping) -> str | None:
@@ -288,9 +288,30 @@ def extract_images_from_html(
 def collect_new_posts(session: Session, settings: Settings, state: State) -> List[Post]:
     state.load()
     seen = state.processed_urls()
+    api_posts = list(iter_api_posts(session, settings))
+    if not seen and settings.bootstrap_max_post_id and not settings.reset_state:
+        available_ids = {post_id for post_id, _, _, _, _ in api_posts}
+        if settings.bootstrap_max_post_id not in available_ids:
+            raise SourceUnavailableError(
+                "State is missing and STATE_BOOTSTRAP_MAX_POST_ID was not found; "
+                "refusing to resend the full archive"
+            )
+        historical_urls = [
+            post_url
+            for post_id, _, post_url, _, _ in api_posts
+            if post_id <= settings.bootstrap_max_post_id
+        ]
+        state.mark_processed(historical_urls)
+        state.save()
+        seen = state.processed_urls()
+        logger.warning(
+            "State was missing; restored %s historical post(s) through WordPress ID %s",
+            len(historical_urls),
+            settings.bootstrap_max_post_id,
+        )
     posts: list[Post] = []
     seen_in_run: set[str] = set()
-    for title, post_url, content_html, featured_url in iter_api_posts(session, settings):
+    for _, title, post_url, content_html, featured_url in api_posts:
         if post_url in seen or post_url in seen_in_run:
             continue
         image_urls = extract_images_from_html(content_html, post_url, featured_url)

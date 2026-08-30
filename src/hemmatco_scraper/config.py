@@ -24,6 +24,7 @@ class Settings:
     user_agent: str
     reset_state: bool
     expired_cert_sha256: str
+    bootstrap_max_post_id: int
     source_tls_verify: bool = True
 
     @classmethod
@@ -53,6 +54,7 @@ class Settings:
             "BLOG_EXPIRED_CERT_SHA256",
             "C6EED99A187140EFD6E24F0175EB25A8DF6E0DF6E886D27C7793B176EFA7FC11",
         ).replace(":", "").strip().upper()
+        bootstrap_max_post_id = int(os.getenv("STATE_BOOTSTRAP_MAX_POST_ID", "11948"))
 
         return cls(
             base_url=base_url,
@@ -69,6 +71,7 @@ class Settings:
             user_agent=user_agent,
             reset_state=reset_state,
             expired_cert_sha256=expired_cert_sha256,
+            bootstrap_max_post_id=bootstrap_max_post_id,
         )
 
 

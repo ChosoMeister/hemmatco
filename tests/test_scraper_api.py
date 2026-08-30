@@ -6,9 +6,11 @@ import requests
 
 from hemmatco_scraper.scraper import (
     SourceUnavailableError,
+    collect_new_posts,
     extract_images_from_html,
     iter_api_posts,
 )
+from hemmatco_scraper.state import State
 
 
 class FakeResponse:
@@ -58,6 +60,8 @@ class WordPressApiTests(unittest.TestCase):
             request_timeout=30,
             expired_cert_sha256="PIN",
             source_tls_verify=True,
+            bootstrap_max_post_id=0,
+            reset_state=False,
         )
 
     def test_posts_are_returned_oldest_to_newest_across_pages(self) -> None:
@@ -71,7 +75,7 @@ class WordPressApiTests(unittest.TestCase):
         posts = list(iter_api_posts(session, self.settings()))
 
         self.assertEqual(
-            [post_url for _, post_url, _, _ in posts],
+            [post_url for _, _, post_url, _, _ in posts],
             [
                 "https://hemmatco.com/post-1/",
                 "https://hemmatco.com/post-2/",
@@ -148,6 +152,44 @@ class WordPressApiTests(unittest.TestCase):
                 "https://hemmatco.com/image-2.jpg",
             ],
         )
+
+    def test_missing_state_bootstraps_through_last_proven_id(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        session = FakeSession(
+            {
+                1: [api_item(4), api_item(3)],
+                2: [api_item(2), api_item(1)],
+            }
+        )
+        settings = self.settings()
+        settings.bootstrap_max_post_id = 2
+        with tempfile.TemporaryDirectory() as directory:
+            state = State(Path(directory) / "state.json")
+            posts = collect_new_posts(session, settings, state)
+
+            self.assertEqual(
+                [post.url for post in posts],
+                [
+                    "https://hemmatco.com/post-3/",
+                    "https://hemmatco.com/post-4/",
+                ],
+            )
+            self.assertTrue(state.is_processed("https://hemmatco.com/post-1/"))
+            self.assertTrue(state.is_processed("https://hemmatco.com/post-2/"))
+
+    def test_missing_state_fails_closed_when_boundary_is_not_found(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        session = FakeSession({1: [api_item(2), api_item(1)]})
+        settings = self.settings()
+        settings.bootstrap_max_post_id = 99
+        with tempfile.TemporaryDirectory() as directory:
+            state = State(Path(directory) / "state.json")
+            with self.assertRaises(SourceUnavailableError):
+                collect_new_posts(session, settings, state)
 
 
 if __name__ == "__main__":
